@@ -84,7 +84,14 @@ section "Listening Ports"
 ss -tlnp 2>/dev/null || echo "N/A"
 
 section "UFW Status"
-ufw status 2>/dev/null || echo "UFW not available or not permitted"
+if sudo -n ufw status verbose 2>/dev/null; then
+    :
+elif [ -f /etc/ufw/ufw.conf ]; then
+    echo "UFW installed (sudo required for full status, reading config):"
+    grep -i '^ENABLED' /etc/ufw/ufw.conf 2>/dev/null || echo "ENABLED key not found"
+else
+    echo "UFW not installed"
+fi
 
 section "Postfix Configuration (if present)"
 if command -v postconf &>/dev/null; then
