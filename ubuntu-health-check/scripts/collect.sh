@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Ubuntu Health Check - Information Collector
 # Read-only script: no modifications, no sudo required
-set -euo pipefail
+set +e  # continue on errors (many commands may fail due to permissions)
 
 section() {
   echo ""
@@ -157,10 +157,77 @@ fi
 
 section "System Info"
 echo "Hostname: $(hostname)"
-echo "OS: $(lsb_release -ds 2>/dev/null || cat /etc/os-release 2>/dev/null | head -2)"
+echo "OS: $(lsb_release -ds 2>/dev/null || head -2 /etc/os-release 2>/dev/null)"
 echo "Kernel: $(uname -r)"
 echo "Uptime: $(uptime -p 2>/dev/null || uptime)"
 echo "Last boot: $(who -b 2>/dev/null | awk '{print $3, $4}')"
+
+# ----------------------------------------
+# OS Support / Ubuntu Pro
+# ----------------------------------------
+section "Ubuntu Pro / ESM Status"
+if command -v pro &>/dev/null; then
+  pro status 2>/dev/null || echo "Cannot query pro status"
+elif command -v ua &>/dev/null; then
+  ua status 2>/dev/null || echo "Cannot query ua status"
+else
+  echo "ubuntu-advantage-tools not installed"
+fi
+
+section "OS EOL Check"
+CODENAME=$(lsb_release -cs 2>/dev/null)
+echo "Codename: $CODENAME"
+if command -v ubuntu-distro-info &>/dev/null; then
+  echo "Fullname: $(ubuntu-distro-info --series="$CODENAME" --fullname 2>/dev/null)"
+  echo "Days to EOL: $(ubuntu-distro-info --series="$CODENAME" -yeol 2>/dev/null | awk '{print $NF}')"
+  echo "In --supported list: $(ubuntu-distro-info --supported 2>/dev/null | grep -q "$CODENAME" && echo "YES" || echo "NO")"
+  echo "In --supported-esm list: $(ubuntu-distro-info --supported-esm 2>/dev/null | grep -q "$CODENAME" && echo "YES" || echo "NO")"
+  echo "In --unsupported list: $(ubuntu-distro-info --unsupported 2>/dev/null | grep -q "$CODENAME" && echo "YES" || echo "NO")"
+else
+  grep -E "^(NAME|VERSION|SUPPORT_URL)" /etc/os-release 2>/dev/null || true
+fi
+echo "Current date: $(date +%Y-%m-%d)"
+
+# ----------------------------------------
+# APT Repository Health
+# ----------------------------------------
+section "APT Repository Errors"
+apt-get update --print-uris 2>&1 | grep -iE "NO_PUBKEY|expired|error|warning" || echo "No repository errors detected"
+
+section "APT Key Expiry Check"
+if [ -d /etc/apt/trusted.gpg.d ]; then
+  for keyfile in /etc/apt/trusted.gpg.d/*.gpg; do
+    [ -f "$keyfile" ] || continue
+    echo "--- $(basename "$keyfile") ---"
+    gpg --no-default-keyring --keyring "$keyfile" --list-keys --with-colons 2>/dev/null \
+      | awk -F: '/^pub/{print "Key: "$5" Expires: "($7=="" ? "never" : strftime("%Y-%m-%d",$7))}'
+  done
+fi
+
+# ----------------------------------------
+# Hardware Health
+# ----------------------------------------
+section "SMART Disk Health"
+if command -v smartctl &>/dev/null; then
+  for dev in /dev/sd? /dev/nvme?n?; do
+    [ -b "$dev" ] || continue
+    echo "--- $dev ---"
+    smartctl -H "$dev" 2>/dev/null || echo "Cannot read SMART (may need sudo)"
+  done
+else
+  echo "smartmontools not installed (recommend: sudo apt install smartmontools)"
+fi
+
+section "NTP Sync"
+timedatectl status 2>/dev/null || echo "N/A"
+
+section "CPU Temperature"
+for z in /sys/class/thermal/thermal_zone*; do
+  [ -d "$z" ] || continue
+  type=$(cat "$z/type" 2>/dev/null)
+  temp=$(awk '{printf "%.0f", $1/1000}' "$z/temp" 2>/dev/null)
+  echo "$type: ${temp}°C"
+done
 
 echo ""
 echo "========================================"
