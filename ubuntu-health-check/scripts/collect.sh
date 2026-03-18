@@ -84,14 +84,7 @@ section "Listening Ports"
 ss -tlnp 2>/dev/null || echo "N/A"
 
 section "UFW Status"
-if sudo -n ufw status verbose 2>/dev/null; then
-    :
-elif [ -f /etc/ufw/ufw.conf ]; then
-    echo "UFW installed (sudo required for full status, reading config):"
-    grep -i '^ENABLED' /etc/ufw/ufw.conf 2>/dev/null || echo "ENABLED key not found"
-else
-    echo "UFW not installed"
-fi
+ufw status 2>/dev/null || echo "UFW not available or not permitted"
 
 section "Postfix Configuration (if present)"
 if command -v postconf &>/dev/null; then
@@ -235,6 +228,73 @@ for z in /sys/class/thermal/thermal_zone*; do
   temp=$(awk '{printf "%.0f", $1/1000}' "$z/temp" 2>/dev/null)
   echo "$type: ${temp}°C"
 done
+
+# ----------------------------------------
+# GPU & Window System
+# ----------------------------------------
+section "GPU - PCI Device"
+lspci | grep -iE "vga|display|3d controller" 2>/dev/null || echo "N/A"
+
+section "GPU - Kernel Driver"
+lspci -k 2>/dev/null | grep -A3 -iE "vga|display|3d controller" | grep -E "driver in use|kernel modules" || echo "N/A"
+
+section "GPU - Kernel Modules Loaded"
+lsmod 2>/dev/null | grep -E "^(i915|nvidia|amdgpu|radeon|nouveau|vmwgfx)" || echo "None matched"
+
+section "GPU - DRM Devices"
+ls /dev/dri/ 2>/dev/null || echo "N/A"
+
+section "GPU - Display Outputs and Connection Status"
+for f in /sys/class/drm/card*/status; do
+  [ -f "$f" ] || continue
+  echo "$(basename "$(dirname "$f")"): $(cat "$f")"
+done
+
+section "GPU - Frequency (MHz)"
+for card in /sys/class/drm/card*; do
+  [ -d "$card" ] || continue
+  cardname=$(basename "$card")
+  cur=$(cat "$card/device/drm/$cardname/gt_cur_freq_mhz" 2>/dev/null)
+  max=$(cat "$card/device/drm/$cardname/gt_max_freq_mhz" 2>/dev/null)
+  [ -n "$cur" ] && echo "$cardname: cur=${cur}MHz max=${max}MHz"
+done
+
+section "Window System - Session"
+echo "XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-unknown}"
+echo "WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-not set}"
+echo "DISPLAY=${DISPLAY:-not set}"
+echo "XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-unknown}"
+echo "DESKTOP_SESSION=${DESKTOP_SESSION:-unknown}"
+
+section "Window System - Compositor Process"
+ps aux 2>/dev/null | grep -E "gnome-shell|kwin_wayland|kwin_x11|mutter|sway|weston|xfwm|openbox|i3" | grep -v grep
+
+section "Window System - Compositor Resource Usage"
+COMPOSITOR_PID=$(ps -eo pid,comm 2>/dev/null | grep -E "gnome-shell|kwin_wayland|kwin_x11|sway|weston" | grep -v grep | awk '{print $1}' | head -1)
+if [ -n "$COMPOSITOR_PID" ]; then
+  ps -p "$COMPOSITOR_PID" -o pid,etime,pcpu,pmem,rss,comm 2>/dev/null
+else
+  echo "No known compositor PID found"
+fi
+
+section "Window System - OpenGL Renderer (via Xwayland)"
+_DISPLAY="${DISPLAY:-:0}"
+if command -v glxinfo &>/dev/null; then
+  DISPLAY="$_DISPLAY" glxinfo 2>/dev/null | grep -E "direct rendering|renderer string|vendor string|OpenGL version" || echo "glxinfo returned no output"
+else
+  echo "glxinfo not found (install: sudo apt install mesa-utils)"
+fi
+
+section "Window System - GNOME Experimental Features"
+if command -v gsettings &>/dev/null; then
+  gsettings get org.gnome.mutter experimental-features 2>/dev/null || echo "N/A (not GNOME or schema not found)"
+else
+  echo "gsettings not available"
+fi
+
+section "Window System - Recent Compositor Errors (last 24h)"
+journalctl --user -b --no-pager -p warning --since "24 hours ago" 2>/dev/null \
+  | grep -iE "gnome-shell|mutter|wayland|i915|drm|display" | tail -20 || echo "N/A"
 
 echo ""
 echo "========================================"

@@ -82,6 +82,21 @@ bash ~/.claude/skills/ubuntu-health-check/scripts/collect.sh 2>&1
     - 古い Snap リビジョン
     - Docker 未使用リソース
 
+11. **GPU・ウィンドウシステム相性**
+    - GPU の世代・ベンダー（Intel/AMD/NVIDIA）と搭載ドライバ（i915/amdgpu/nvidia/nouveau）
+    - セッションタイプ（Wayland / X11）とデスクトップ環境の組み合わせ
+    - コンポジター（gnome-shell / kwin / sway など）の CPU・メモリ使用率
+      - gnome-shell の CPU が 10% 超で 🟡、15% 超で 🔴（リークの疑い）
+      - RSS が 1GB 超で 🟡（稼働日数も考慮）
+    - 接続ディスプレイのインターフェース（VGA接続は機能制限あり、DP/HDMI推奨）
+    - OpenGL が動作しているか（glxinfo で direct rendering: yes を確認）
+    - コンポジターの最近のエラー・アサーション失敗ログ
+    - 判断基準:
+      - i915/amdgpu + Wayland は基本良好。古い世代（2013年以前）は要注意
+      - NVIDIA + Wayland は nvidia-drm.modeset=1 が必要。nouveau は動作不安定なことがある
+      - VGA 接続のみの場合、direct scan-out 最適化が無効になる可能性を注記
+      - glxinfo で "direct rendering: No" の場合は 🔴（ソフトウェアレンダリング）
+
 ### Step 3: レポート出力
 
 以下の形式でレポートを出力する:
@@ -116,3 +131,5 @@ bash ~/.claude/skills/ubuntu-health-check/scripts/collect.sh 2>&1
 - Docker や Snap がインストールされていない場合、そのセクションはスキップされる。
 - SMART 情報の取得には `smartmontools` パッケージが必要。未インストールの場合は導入を推奨に含める。
 - APT 鍵の検証では `apt-get update --print-uris` を使う（実際の update は実行しない）。
+- GPU・ウィンドウシステムの情報は `XDG_SESSION_TYPE` などの環境変数に依存するため、SSH 経由の非グラフィカルセッションでは取得できない場合がある。取得できなかった場合はそのセクションをスキップする。
+- `glxinfo` は `mesa-utils` パッケージに含まれる。未インストールの場合は "glxinfo not found" となり、推奨に含める。
