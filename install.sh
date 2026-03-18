@@ -7,6 +7,6 @@ mkdir -p "$TARGET"
 
 for skill in "$SKILLS_DIR"/*/; do
     name=$(basename "$skill")
-    cp -r "$skill" "$TARGET/$name"
+    cp -r "$skill/." "$TARGET/$name/"
     echo "Installed: $name"
 done
